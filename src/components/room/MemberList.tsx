@@ -97,12 +97,17 @@ export function MemberList({ roomId, currentUserId, initialMembers }: Props) {
 
           const { data: activeSessions } = await supabase
             .from("study_sessions")
-            .select("user_id, started_at")
+            .select("user_id, started_at, last_heartbeat_at")
             .eq("room_id", roomId)
             .is("ended_at", null);
 
           const activeMap = new Map(
-            (activeSessions || []).map((s) => [s.user_id, s.started_at]),
+            (activeSessions || [])
+              .filter((s) => {
+                if (!s.last_heartbeat_at) return true;
+                return Date.now() - new Date(s.last_heartbeat_at).getTime() < 90_000;
+              })
+              .map((s) => [s.user_id, s.started_at]),
           );
 
           const dayStart = new Date();
@@ -191,7 +196,7 @@ export function MemberList({ roomId, currentUserId, initialMembers }: Props) {
           return (
             <li
               key={member.user_id}
-              className="flex items-center justify-between gap-3 rounded-xl px-2 py-2 transition hover:bg-white/40"
+              className="flex items-center justify-between gap-3 rounded-xl px-2 py-2 transition hover:bg-[var(--panel-strong)]"
             >
               <div className="flex min-w-0 items-center gap-3">
                 <StatusDot status={status} />

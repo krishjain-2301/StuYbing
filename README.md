@@ -19,9 +19,11 @@ A real-time virtual study room where friends study together, share screens live 
 ### Study experience
 - Server-timed study sessions (start / stop / heartbeat — not client-clock based)
 - Live member status: studying / online / offline
-- Live-only **WebRTC screen sharing** (no recording, storage, or replay)
+- Camera, microphone, and live-only WebRTC screen sharing (never recorded)
+- Leave room (ends your study session)
 - Personal to-do list with priorities
 - In-room notifications (join, start/stop study, screen share)
+- Live room chat
 
 ### Competition & progress
 - Room leaderboards: daily / weekly / monthly
@@ -61,7 +63,8 @@ npm install
 
 1. Create a project at [supabase.com](https://supabase.com)
 2. In **SQL Editor**, run [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql)
-3. Enable **Email** under Authentication → Providers
+3. If the app already existed, also run [`supabase/migrations/002_room_messages.sql`](supabase/migrations/002_room_messages.sql) for room chat
+4. Enable **Email** under Authentication → Providers
 
 **Authentication → URL Configuration** (local):
 

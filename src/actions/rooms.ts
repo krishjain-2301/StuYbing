@@ -94,3 +94,56 @@ export async function joinRoom(formData: FormData): Promise<ActionResult> {
   revalidatePath("/dashboard");
   redirect(`/room/${code}`);
 }
+
+export async function leaveRoom(roomCode: string): Promise<ActionResult> {
+  const { supabase, user } = await requireUser();
+  const code = roomCode.trim().toUpperCase();
+
+  const { data: room } = await supabase
+    .from("rooms")
+    .select("id")
+    .eq("room_code", code)
+    .maybeSingle();
+
+  if (!room) {
+    return { error: "Room not found." };
+  }
+
+  const { data: active } = await supabase
+    .from("study_sessions")
+    .select("id, started_at")
+    .eq("user_id", user.id)
+    .eq("room_id", room.id)
+    .is("ended_at", null)
+    .maybeSingle();
+
+  if (active) {
+    const endedAt = new Date();
+    const durationSeconds = Math.max(
+      0,
+      Math.floor((endedAt.getTime() - new Date(active.started_at).getTime()) / 1000),
+    );
+    await supabase
+      .from("study_sessions")
+      .update({
+        ended_at: endedAt.toISOString(),
+        duration_seconds: durationSeconds,
+        last_heartbeat_at: endedAt.toISOString(),
+      })
+      .eq("id", active.id)
+      .eq("user_id", user.id);
+  }
+
+  const { error } = await supabase
+    .from("room_members")
+    .delete()
+    .eq("room_id", room.id)
+    .eq("user_id", user.id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard");
+}

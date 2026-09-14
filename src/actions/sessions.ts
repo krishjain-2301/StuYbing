@@ -12,6 +12,37 @@ export type SessionActionResult = {
   };
 };
 
+const STALE_MS = 90_000;
+
+async function closeOwnStaleSessions(
+  supabase: NonNullable<Awaited<ReturnType<typeof getAuthedClient>>["supabase"]>,
+  userId: string,
+) {
+  const cutoff = new Date(Date.now() - STALE_MS).toISOString();
+  const { data: stale } = await supabase
+    .from("study_sessions")
+    .select("id, started_at")
+    .eq("user_id", userId)
+    .is("ended_at", null)
+    .lt("last_heartbeat_at", cutoff);
+
+  for (const session of stale || []) {
+    const endedAt = new Date();
+    const durationSeconds = Math.max(
+      0,
+      Math.floor((endedAt.getTime() - new Date(session.started_at).getTime()) / 1000),
+    );
+    await supabase
+      .from("study_sessions")
+      .update({
+        ended_at: endedAt.toISOString(),
+        duration_seconds: durationSeconds,
+      })
+      .eq("id", session.id)
+      .eq("user_id", userId);
+  }
+}
+
 async function getAuthedClient() {
   const supabase = await createClient();
   const {
@@ -29,6 +60,8 @@ export async function startStudySession(
 ): Promise<SessionActionResult> {
   const { supabase, user, error } = await getAuthedClient();
   if (error || !supabase || !user) return { error: error || "Not authenticated." };
+
+  await closeOwnStaleSessions(supabase, user.id);
 
   const { data: membership } = await supabase
     .from("room_members")
@@ -122,6 +155,8 @@ export async function stopStudySession(
 export async function heartbeatStudySession(): Promise<SessionActionResult> {
   const { supabase, user, error } = await getAuthedClient();
   if (error || !supabase || !user) return { error: error || "Not authenticated." };
+
+  await closeOwnStaleSessions(supabase, user.id);
 
   const now = new Date().toISOString();
   const { data: active, error: updateError } = await supabase

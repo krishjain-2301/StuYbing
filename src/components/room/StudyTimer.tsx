@@ -41,10 +41,24 @@ export function StudyTimer({
     if (!startedAt) return;
     const id = window.setInterval(() => {
       void heartbeatStudySession();
-    }, 30000);
+    }, 20000);
     void heartbeatStudySession();
     return () => window.clearInterval(id);
   }, [startedAt]);
+
+  useEffect(() => {
+    if (!startedAt) return;
+    const onHide = () => {
+      void fetch("/api/sessions/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomCode }),
+        keepalive: true,
+      });
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [startedAt, roomCode]);
 
   const elapsed = startedAt
     ? Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
@@ -129,7 +143,7 @@ export function StudyTimer({
         <p className="relative mt-4 text-sm text-red-700">{error}</p>
       ) : null}
       <p className="relative mt-4 text-xs text-[var(--muted)]">
-        Time is counted from the server clock. Closing the tab stops counting only after you press Stop.
+        Time is counted from the server clock. Leaving or closing this tab ends your session.
       </p>
     </section>
   );

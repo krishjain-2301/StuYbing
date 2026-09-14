@@ -9,10 +9,12 @@ import { MemberList, type MemberRow } from "@/components/room/MemberList";
 import { Leaderboard } from "@/components/room/Leaderboard";
 import { TodoList } from "@/components/room/TodoList";
 import { InviteLink } from "@/components/room/InviteLink";
-import { ScreenSharePanel } from "@/components/room/ScreenSharePanel";
+import { RoomMedia } from "@/components/room/RoomMedia";
+import { RoomChat } from "@/components/room/RoomChat";
+import { LeaveRoomButton } from "@/components/room/LeaveRoomButton";
 import { RoomNotifications } from "@/components/room/RoomNotifications";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import type { Task } from "@/lib/types";
+import type { ChatMessage, Task } from "@/lib/types";
 
 type Props = {
   params: Promise<{ code: string }>;
@@ -69,12 +71,18 @@ export default async function RoomPage({ params }: Props) {
 
   const { data: activeSessions } = await supabase
     .from("study_sessions")
-    .select("user_id, started_at")
+    .select("user_id, started_at, last_heartbeat_at")
     .eq("room_id", room.id)
     .is("ended_at", null);
 
+  const STALE_MS = 90_000;
   const activeMap = new Map(
-    (activeSessions || []).map((s) => [s.user_id, s.started_at]),
+    (activeSessions || [])
+      .filter((s) => {
+        if (!s.last_heartbeat_at) return true;
+        return Date.now() - new Date(s.last_heartbeat_at).getTime() < STALE_MS;
+      })
+      .map((s) => [s.user_id, s.started_at]),
   );
 
   const dayStart = startOfDayISO();
@@ -127,6 +135,28 @@ export default async function RoomPage({ params }: Props) {
 
   const tasks = (tasksData || []) as Task[];
 
+  const { data: chatRows } = await supabase
+    .from("room_messages")
+    .select("id, room_id, user_id, body, created_at")
+    .eq("room_id", room.id)
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  const chatUserIds = [...new Set((chatRows || []).map((row) => row.user_id))];
+  const { data: chatProfiles } = chatUserIds.length
+    ? await supabase.from("profiles").select("id, username").in("id", chatUserIds)
+    : { data: [] as { id: string; username: string }[] };
+
+  const chatNames = new Map((chatProfiles || []).map((p) => [p.id, p.username]));
+  const initialMessages: ChatMessage[] = (chatRows || []).map((row) => ({
+    id: row.id,
+    room_id: row.room_id,
+    user_id: row.user_id,
+    username: chatNames.get(row.user_id) || "Member",
+    body: row.body,
+    created_at: row.created_at,
+  }));
+
   return (
     <div className="min-h-screen pb-16">
       <div className="nav-shell">
@@ -147,6 +177,7 @@ export default async function RoomPage({ params }: Props) {
               Code {room.room_code}
             </span>
             <InviteLink roomCode={room.room_code} />
+            <LeaveRoomButton roomCode={room.room_code} />
             <ThemeToggle />
           </div>
         </header>
@@ -160,7 +191,7 @@ export default async function RoomPage({ params }: Props) {
             initialStartedAt={myActive}
             username={profile.username}
           />
-          <ScreenSharePanel
+          <RoomMedia
             roomId={room.id}
             userId={profile.id}
             username={profile.username}
@@ -182,6 +213,11 @@ export default async function RoomPage({ params }: Props) {
             initialDaily={daily}
             initialWeekly={weekly}
             initialMonthly={monthly}
+          />
+          <RoomChat
+            roomId={room.id}
+            currentUserId={profile.id}
+            initialMessages={initialMessages}
           />
         </div>
       </main>

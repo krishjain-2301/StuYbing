@@ -121,15 +121,15 @@ export function TodoList({ roomId, roomCode, initialTasks }: Props) {
         <input
           name="title"
           placeholder="Add a task…"
-          className="input flex-1"
+          className="input min-w-0 flex-1"
           required
         />
-        <select name="priority" defaultValue="medium" className="input sm:w-32">
+        <select name="priority" defaultValue="medium" className="input sm:w-36">
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        <button type="submit" className="btn-secondary" disabled={pending}>
+        <button type="submit" className="btn-secondary shrink-0" disabled={pending}>
           Add
         </button>
       </form>
@@ -140,7 +140,7 @@ export function TodoList({ roomId, roomCode, initialTasks }: Props) {
         {optimisticTasks.map((task) => (
           <li
             key={task.id}
-            className="flex items-start gap-3 rounded-xl bg-white/35 px-3 py-2.5"
+            className="flex items-start gap-3 rounded-xl bg-[var(--panel-strong)] px-3 py-2.5"
           >
             <button
               type="button"
@@ -149,7 +149,7 @@ export function TodoList({ roomId, roomCode, initialTasks }: Props) {
               className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                 task.completed
                   ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]"
-                  : "border-[var(--line)] bg-white"
+                  : "border-[var(--line)] bg-[var(--panel-strong)]"
               }`}
             >
               {task.completed ? "✓" : ""}

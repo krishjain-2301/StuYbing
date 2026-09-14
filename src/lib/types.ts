@@ -56,3 +56,12 @@ export type LeaderboardEntry = {
   avatar_url: string | null;
   total_seconds: number;
 };
+
+export type ChatMessage = {
+  id: string;
+  room_id: string;
+  user_id: string;
+  username: string;
+  body: string;
+  created_at: string;
+};
