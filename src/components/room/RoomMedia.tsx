@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { ICE_SERVERS } from "@/lib/webrtc";
 import { notifyRoom } from "@/components/room/RoomNotifications";
@@ -12,20 +12,21 @@ type Signal =
   | { type: "ice"; from: string; to: string; candidate: RTCIceCandidateInit }
   | { type: "bye"; from: string };
 
-type PeerBundle = {
+type PeerLink = {
   pc: RTCPeerConnection;
-  camera: RTCRtpTransceiver;
-  mic: RTCRtpTransceiver;
-  screen: RTCRtpTransceiver;
   pendingIce: RTCIceCandidateInit[];
   makingOffer: boolean;
+  cameraSender: RTCRtpSender | null;
+  micSender: RTCRtpSender | null;
+  screenSender: RTCRtpSender | null;
 };
 
-type RemoteMedia = {
+type RemotePeer = {
   userId: string;
   username: string;
-  camera: MediaStream;
+  stream: MediaStream;
   screen: MediaStream | null;
+  connection: string;
 };
 
 export function RoomMedia({
@@ -40,20 +41,26 @@ export function RoomMedia({
   const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [remotes, setRemotes] = useState<RemoteMedia[]>([]);
+  const [localPreview, setLocalPreview] = useState<MediaStream | null>(null);
+  const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
+  const [remotes, setRemotes] = useState<RemotePeer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
 
-  const localCamRef = useRef<HTMLVideoElement | null>(null);
-  const localScreenRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
-  const peersRef = useRef<Map<string, PeerBundle>>(new Map());
+  const peersRef = useRef<Map<string, PeerLink>>(new Map());
+  const remoteStreamsRef = useRef<Map<string, { cam: MediaStream; screen: MediaStream }>>(
+    new Map(),
+  );
   const namesRef = useRef<Map<string, string>>(new Map());
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>["channel"]> | null>(
     null,
   );
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
+
+  const bump = useCallback(() => setTick((n) => n + 1), []);
 
   const broadcast = useCallback((payload: Signal) => {
     void channelRef.current?.send({
@@ -63,114 +70,61 @@ export function RoomMedia({
     });
   }, []);
 
-  const upsertRemote = useCallback(
-    (peerId: string, patch: Partial<RemoteMedia>) => {
-      setRemotes((prev) => {
-        const existing = prev.find((r) => r.userId === peerId);
-        const next: RemoteMedia = {
-          userId: peerId,
-          username: patch.username || existing?.username || namesRef.current.get(peerId) || "Peer",
-          camera: patch.camera || existing?.camera || new MediaStream(),
-          screen: patch.screen !== undefined ? patch.screen : existing?.screen || null,
-        };
-        return [...prev.filter((r) => r.userId !== peerId), next];
-      });
-    },
-    [],
-  );
-
-  const applyLocalTracks = useCallback((peer: PeerBundle) => {
-    const camTrack = cameraStreamRef.current?.getVideoTracks()[0] || null;
-    const micTrack = cameraStreamRef.current?.getAudioTracks()[0] || null;
-    const screenTrack = screenStreamRef.current?.getVideoTracks()[0] || null;
-    void peer.camera.sender.replaceTrack(camTrack);
-    void peer.mic.sender.replaceTrack(micTrack);
-    void peer.screen.sender.replaceTrack(screenTrack);
+  const publishRemotes = useCallback(() => {
+    setRemotes(
+      [...remoteStreamsRef.current.entries()].map(([id, streams]) => ({
+        userId: id,
+        username: namesRef.current.get(id) || "Peer",
+        stream: streams.cam,
+        screen: streams.screen.getVideoTracks().some((t) => t.readyState === "live" && !t.muted)
+          ? streams.screen
+          : null,
+        connection: peersRef.current.get(id)?.pc.connectionState || "new",
+      })),
+    );
   }, []);
 
-  const teardownPeer = useCallback((peerId: string) => {
-    const peer = peersRef.current.get(peerId);
-    if (peer) {
-      peer.pc.close();
-      peersRef.current.delete(peerId);
-    }
-    setRemotes((prev) => prev.filter((r) => r.userId !== peerId));
-  }, []);
-
-  const ensurePeer = useCallback(
+  const teardownPeer = useCallback(
     (peerId: string) => {
-      const existing = peersRef.current.get(peerId);
-      if (existing) return existing;
-
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      const camera = pc.addTransceiver("video", { direction: "sendrecv" });
-      const mic = pc.addTransceiver("audio", { direction: "sendrecv" });
-      const screen = pc.addTransceiver("video", { direction: "sendrecv" });
-      const bundle: PeerBundle = {
-        pc,
-        camera,
-        mic,
-        screen,
-        pendingIce: [],
-        makingOffer: false,
-      };
-      peersRef.current.set(peerId, bundle);
-
-      const cameraStream = new MediaStream();
-      const screenStream = new MediaStream();
-      upsertRemote(peerId, { camera: cameraStream, screen: null });
-
-      pc.onicecandidate = (event) => {
-        if (!event.candidate) return;
-        broadcast({
-          type: "ice",
-          from: userIdRef.current,
-          to: peerId,
-          candidate: event.candidate.toJSON(),
-        });
-      };
-
-      pc.ontrack = (event) => {
-        const track = event.track;
-        if (event.transceiver === camera || event.transceiver.mid === camera.mid) {
-          cameraStream.getTracks().forEach((t) => cameraStream.removeTrack(t));
-          cameraStream.addTrack(track);
-          upsertRemote(peerId, { camera: cameraStream });
-          return;
-        }
-        if (event.transceiver === mic || event.transceiver.mid === mic.mid) {
-          cameraStream.addTrack(track);
-          upsertRemote(peerId, { camera: cameraStream });
-          return;
-        }
-        if (event.transceiver === screen || event.transceiver.mid === screen.mid) {
-          if (track.muted || track.readyState === "ended") {
-            upsertRemote(peerId, { screen: null });
-            return;
-          }
-          screenStream.getVideoTracks().forEach((t) => screenStream.removeTrack(t));
-          screenStream.addTrack(track);
-          track.onunmute = () => upsertRemote(peerId, { screen: screenStream });
-          track.onmute = () => upsertRemote(peerId, { screen: null });
-          track.onended = () => upsertRemote(peerId, { screen: null });
-          upsertRemote(peerId, { screen: screenStream });
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === "failed") {
-          pc.restartIce();
-        }
-        if (pc.connectionState === "closed") {
-          teardownPeer(peerId);
-        }
-      };
-
-      applyLocalTracks(bundle);
-      return bundle;
+      const peer = peersRef.current.get(peerId);
+      if (peer) {
+        peer.pc.close();
+        peersRef.current.delete(peerId);
+      }
+      remoteStreamsRef.current.delete(peerId);
+      publishRemotes();
     },
-    [applyLocalTracks, broadcast, teardownPeer, upsertRemote],
+    [publishRemotes],
   );
+
+  const attachLocalTracks = useCallback(async (peer: PeerLink) => {
+    const cam = cameraStreamRef.current?.getVideoTracks()[0] || null;
+    const mic = cameraStreamRef.current?.getAudioTracks()[0] || null;
+    const screen = screenStreamRef.current?.getVideoTracks()[0] || null;
+    const camStream = cameraStreamRef.current;
+    const screenStream = screenStreamRef.current;
+
+    if (cam && camStream) {
+      if (peer.cameraSender) await peer.cameraSender.replaceTrack(cam);
+      else peer.cameraSender = peer.pc.addTrack(cam, camStream);
+    } else if (peer.cameraSender) {
+      await peer.cameraSender.replaceTrack(null);
+    }
+
+    if (mic && camStream) {
+      if (peer.micSender) await peer.micSender.replaceTrack(mic);
+      else peer.micSender = peer.pc.addTrack(mic, camStream);
+    } else if (peer.micSender) {
+      await peer.micSender.replaceTrack(null);
+    }
+
+    if (screen && screenStream) {
+      if (peer.screenSender) await peer.screenSender.replaceTrack(screen);
+      else peer.screenSender = peer.pc.addTrack(screen, screenStream);
+    } else if (peer.screenSender) {
+      await peer.screenSender.replaceTrack(null);
+    }
+  }, []);
 
   const negotiate = useCallback(
     async (peerId: string) => {
@@ -180,12 +134,14 @@ export function RoomMedia({
         peer.makingOffer = true;
         const offer = await peer.pc.createOffer();
         await peer.pc.setLocalDescription(offer);
-        broadcast({
-          type: "offer",
-          from: userIdRef.current,
-          to: peerId,
-          sdp: peer.pc.localDescription!,
-        });
+        if (peer.pc.localDescription) {
+          broadcast({
+            type: "offer",
+            from: userIdRef.current,
+            to: peerId,
+            sdp: peer.pc.localDescription,
+          });
+        }
       } finally {
         peer.makingOffer = false;
       }
@@ -193,7 +149,7 @@ export function RoomMedia({
     [broadcast],
   );
 
-  const flushIce = useCallback(async (peer: PeerBundle) => {
+  const flushIce = useCallback(async (peer: PeerLink) => {
     if (!peer.pc.remoteDescription) return;
     const queued = peer.pendingIce.splice(0);
     for (const candidate of queued) {
@@ -205,24 +161,113 @@ export function RoomMedia({
     }
   }, []);
 
+  const ensurePeer = useCallback(
+    (peerId: string) => {
+      const existing = peersRef.current.get(peerId);
+      if (existing) return existing;
+
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const peer: PeerLink = {
+        pc,
+        pendingIce: [],
+        makingOffer: false,
+        cameraSender: null,
+        micSender: null,
+        screenSender: null,
+      };
+      peersRef.current.set(peerId, peer);
+
+      if (!remoteStreamsRef.current.has(peerId)) {
+        remoteStreamsRef.current.set(peerId, {
+          cam: new MediaStream(),
+          screen: new MediaStream(),
+        });
+      }
+      publishRemotes();
+
+      pc.onicecandidate = (event) => {
+        if (!event.candidate) return;
+        broadcast({
+          type: "ice",
+          from: userIdRef.current,
+          to: peerId,
+          candidate: event.candidate.toJSON(),
+        });
+      };
+
+      pc.onnegotiationneeded = () => {
+        void negotiate(peerId);
+      };
+
+      pc.ontrack = (event) => {
+        const track = event.track;
+        const bucket = remoteStreamsRef.current.get(peerId) || {
+          cam: new MediaStream(),
+          screen: new MediaStream(),
+        };
+        remoteStreamsRef.current.set(peerId, bucket);
+
+        if (track.kind === "audio") {
+          if (!bucket.cam.getAudioTracks().some((t) => t.id === track.id)) {
+            bucket.cam.addTrack(track);
+          }
+        } else if (bucket.cam.getVideoTracks().length === 0) {
+          bucket.cam.addTrack(track);
+        } else if (!bucket.cam.getVideoTracks().some((t) => t.id === track.id)) {
+          bucket.screen.getVideoTracks().forEach((old) => bucket.screen.removeTrack(old));
+          bucket.screen.addTrack(track);
+        }
+
+        track.onunmute = () => {
+          bump();
+          publishRemotes();
+        };
+        track.onended = () => {
+          bucket.cam.removeTrack(track);
+          bucket.screen.removeTrack(track);
+          publishRemotes();
+        };
+
+        bump();
+        publishRemotes();
+      };
+
+      pc.onconnectionstatechange = () => {
+        publishRemotes();
+        if (pc.connectionState === "failed") {
+          try {
+            pc.restartIce();
+          } catch {
+            // ignore
+          }
+        }
+      };
+
+      void attachLocalTracks(peer);
+      return peer;
+    },
+    [attachLocalTracks, broadcast, bump, negotiate, publishRemotes],
+  );
+
+  const connectTo = useCallback(
+    (peerId: string, peerName?: string) => {
+      if (!peerId || peerId === userIdRef.current) return;
+      if (peerName) namesRef.current.set(peerId, peerName);
+      const peer = ensurePeer(peerId);
+      void attachLocalTracks(peer);
+    },
+    [attachLocalTracks, ensurePeer],
+  );
+
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase.channel(`room-media:${roomId}`, {
       config: {
-        broadcast: { self: false },
+        broadcast: { ack: true },
         presence: { key: userId },
       },
     });
     channelRef.current = channel;
-
-    const connectTo = (peerId: string, peerName?: string) => {
-      if (peerId === userId) return;
-      if (peerName) namesRef.current.set(peerId, peerName);
-      ensurePeer(peerId);
-      if (userId < peerId) {
-        void negotiate(peerId);
-      }
-    };
 
     channel
       .on("broadcast", { event: "signal" }, async ({ payload }) => {
@@ -242,30 +287,43 @@ export function RoomMedia({
 
         if (msg.type === "offer" && msg.to === userId) {
           const peer = ensurePeer(msg.from);
-          const offerCollision =
-            peer.makingOffer || peer.pc.signalingState !== "stable";
           const polite = userId > msg.from;
-          if (offerCollision && !polite) return;
-          await peer.pc.setRemoteDescription(msg.sdp);
-          await flushIce(peer);
-          applyLocalTracks(peer);
-          const answer = await peer.pc.createAnswer();
-          await peer.pc.setLocalDescription(answer);
-          broadcast({
-            type: "answer",
-            from: userId,
-            to: msg.from,
-            sdp: peer.pc.localDescription!,
-          });
+          const collision =
+            peer.makingOffer || peer.pc.signalingState !== "stable";
+          if (collision && !polite) return;
+          try {
+            if (collision && polite) {
+              await peer.pc.setLocalDescription({ type: "rollback" });
+            }
+            await peer.pc.setRemoteDescription(msg.sdp);
+            await flushIce(peer);
+            await attachLocalTracks(peer);
+            const answer = await peer.pc.createAnswer();
+            await peer.pc.setLocalDescription(answer);
+            if (peer.pc.localDescription) {
+              broadcast({
+                type: "answer",
+                from: userId,
+                to: msg.from,
+                sdp: peer.pc.localDescription,
+              });
+            }
+          } catch (err) {
+            console.error("Failed to answer offer", err);
+          }
           return;
         }
 
         if (msg.type === "answer" && msg.to === userId) {
           const peer = peersRef.current.get(msg.from);
           if (!peer) return;
-          if (peer.pc.signalingState === "have-local-offer") {
-            await peer.pc.setRemoteDescription(msg.sdp);
-            await flushIce(peer);
+          try {
+            if (peer.pc.signalingState === "have-local-offer") {
+              await peer.pc.setRemoteDescription(msg.sdp);
+              await flushIce(peer);
+            }
+          } catch (err) {
+            console.error("Failed to apply answer", err);
           }
           return;
         }
@@ -291,7 +349,7 @@ export function RoomMedia({
           const name = String(
             (presence as { username?: string }).username || "Peer",
           );
-          if (id) connectTo(id, name);
+          connectTo(id, name);
         }
       })
       .on("presence", { event: "leave" }, ({ key, leftPresences }) => {
@@ -309,10 +367,7 @@ export function RoomMedia({
         const state = channel.presenceState();
         for (const [presenceKey, presences] of Object.entries(state)) {
           const first = (presences as { user_id?: string; username?: string }[])[0];
-          connectTo(
-            String(first?.user_id || presenceKey),
-            first?.username,
-          );
+          connectTo(String(first?.user_id || presenceKey), first?.username);
         }
       });
 
@@ -320,38 +375,24 @@ export function RoomMedia({
       broadcast({ type: "bye", from: userId });
       peersRef.current.forEach((peer) => peer.pc.close());
       peersRef.current.clear();
+      remoteStreamsRef.current.clear();
       void supabase.removeChannel(channel);
     };
   }, [
-    applyLocalTracks,
+    attachLocalTracks,
     broadcast,
+    connectTo,
     ensurePeer,
     flushIce,
-    negotiate,
     roomId,
     teardownPeer,
     userId,
     username,
   ]);
 
-  useEffect(() => {
-    if (localCamRef.current) {
-      localCamRef.current.srcObject = cameraStreamRef.current;
-    }
-  }, [cameraOn]);
-
-  useEffect(() => {
-    if (localScreenRef.current) {
-      localScreenRef.current.srcObject = screenStreamRef.current;
-    }
-  }, [sharing]);
-
-  async function renegotiateAll() {
-    for (const [peerId, peer] of peersRef.current) {
-      applyLocalTracks(peer);
-      if (userId < peerId) {
-        void negotiate(peerId);
-      }
+  async function pushTracksToPeers() {
+    for (const peer of peersRef.current.values()) {
+      await attachLocalTracks(peer);
     }
   }
 
@@ -359,29 +400,31 @@ export function RoomMedia({
     setError(null);
     try {
       if (cameraOn) {
-        cameraStreamRef.current?.getVideoTracks().forEach((t) => t.stop());
-        const audio = cameraStreamRef.current?.getAudioTracks() || [];
-        cameraStreamRef.current = audio.length ? new MediaStream(audio) : null;
+        cameraStreamRef.current?.getVideoTracks().forEach((t) => {
+          t.stop();
+          cameraStreamRef.current?.removeTrack(t);
+        });
+        if (!cameraStreamRef.current?.getAudioTracks().length) {
+          cameraStreamRef.current = null;
+        }
         setCameraOn(false);
-        await renegotiateAll();
+        setLocalPreview(cameraStreamRef.current);
+        await pushTracksToPeers();
         return;
       }
       const cam = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 1280 } },
-        audio: micOn,
+        audio: false,
       });
-      const audioTracks = cameraStreamRef.current?.getAudioTracks() || [];
-      if (audioTracks.length && !micOn) {
-        audioTracks.forEach((t) => cam.addTrack(t));
-      }
-      cameraStreamRef.current = cam;
-      if (localCamRef.current) localCamRef.current.srcObject = cam;
+      const stream = cameraStreamRef.current || new MediaStream();
+      cam.getVideoTracks().forEach((t) => {
+        t.contentHint = "motion";
+        stream.addTrack(t);
+      });
+      cameraStreamRef.current = stream;
       setCameraOn(true);
-      if (micOn && cam.getAudioTracks().length === 0) {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mic.getAudioTracks().forEach((t) => cam.addTrack(t));
-      }
-      await renegotiateAll();
+      setLocalPreview(stream);
+      await pushTracksToPeers();
     } catch {
       setError("Camera permission was blocked or unavailable.");
     }
@@ -396,15 +439,19 @@ export function RoomMedia({
           cameraStreamRef.current?.removeTrack(t);
         });
         setMicOn(false);
-        await renegotiateAll();
+        setLocalPreview(cameraStreamRef.current);
+        await pushTracksToPeers();
         return;
       }
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mic = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
       const stream = cameraStreamRef.current || new MediaStream();
       mic.getAudioTracks().forEach((t) => stream.addTrack(t));
       cameraStreamRef.current = stream;
       setMicOn(true);
-      await renegotiateAll();
+      setLocalPreview(stream);
+      await pushTracksToPeers();
     } catch {
       setError("Microphone permission was blocked or unavailable.");
     }
@@ -416,9 +463,9 @@ export function RoomMedia({
       if (sharing) {
         screenStreamRef.current?.getTracks().forEach((t) => t.stop());
         screenStreamRef.current = null;
-        if (localScreenRef.current) localScreenRef.current.srcObject = null;
         setSharing(false);
-        await renegotiateAll();
+        setLocalScreen(null);
+        await pushTracksToPeers();
         notifyRoom(`${username} stopped sharing`);
         return;
       }
@@ -426,36 +473,24 @@ export function RoomMedia({
         video: { frameRate: 15 },
         audio: false,
       });
-      const track = stream.getVideoTracks()[0];
-      if (track) track.contentHint = "detail";
+      stream.getVideoTracks().forEach((t) => {
+        t.contentHint = "detail";
+      });
       screenStreamRef.current = stream;
-      if (localScreenRef.current) localScreenRef.current.srcObject = stream;
       setSharing(true);
-      track?.addEventListener("ended", () => {
+      setLocalScreen(stream);
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
         screenStreamRef.current = null;
         setSharing(false);
-        void renegotiateAll();
+        setLocalScreen(null);
+        void pushTracksToPeers();
       });
-      await renegotiateAll();
+      await pushTracksToPeers();
       notifyRoom(`${username} started sharing their screen`);
     } catch {
       setError("Screen share was blocked or cancelled.");
     }
   }
-
-  const screens = [
-    ...(sharing && screenStreamRef.current
-      ? [{ id: "local", name: "You", stream: screenStreamRef.current, muted: true }]
-      : []),
-    ...remotes
-      .filter((r) => r.screen && r.screen.getVideoTracks().some((t) => t.readyState === "live"))
-      .map((r) => ({
-        id: r.userId,
-        name: r.username,
-        stream: r.screen!,
-        muted: false,
-      })),
-  ];
 
   return (
     <section className="room-panel space-y-5 p-5 sm:p-6">
@@ -496,19 +531,22 @@ export function RoomMedia({
       <div>
         <p className="eyebrow">People</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <MediaTile
+          <VideoTile
             title={`${username} (you)`}
-            stream={cameraOn || micOn ? cameraStreamRef.current : null}
+            stream={localPreview}
             muted
-            videoRef={localCamRef}
-            placeholder={cameraOn ? null : "Camera off"}
+            placeholder={cameraOn ? "Starting camera…" : "Camera off"}
           />
           {remotes.map((remote) => (
-            <MediaTile
+            <VideoTile
               key={remote.userId}
-              title={remote.username}
-              stream={remote.camera}
-              placeholder="Waiting for video…"
+              title={`${remote.username}${
+                remote.connection && remote.connection !== "connected"
+                  ? ` · ${remote.connection}`
+                  : ""
+              }`}
+              stream={remote.stream}
+              placeholder="Waiting for their camera/mic…"
             />
           ))}
         </div>
@@ -516,22 +554,25 @@ export function RoomMedia({
 
       <div>
         <p className="eyebrow">Screen shares</p>
-        {screens.length === 0 ? (
+        {!localScreen && remotes.every((r) => !r.screen) ? (
           <div className="mt-3 rounded-2xl border border-dashed border-[var(--line)] px-4 py-10 text-center text-sm text-[var(--muted)]">
             No screens shared yet. Use Share screen so everyone can follow along.
           </div>
         ) : (
           <div className="mt-3 grid gap-3">
-            {screens.map((item) => (
-              <MediaTile
-                key={item.id}
-                title={`${item.name} · screen`}
-                stream={item.stream}
-                muted={item.muted}
-                tall
-                videoRef={item.id === "local" ? localScreenRef : undefined}
-              />
-            ))}
+            {localScreen ? (
+              <VideoTile title="You · screen" stream={localScreen} muted tall />
+            ) : null}
+            {remotes.map((remote) =>
+              remote.screen ? (
+                <VideoTile
+                  key={`${remote.userId}-screen`}
+                  title={`${remote.username} · screen`}
+                  stream={remote.screen}
+                  tall
+                />
+              ) : null,
+            )}
           </div>
         )}
       </div>
@@ -539,41 +580,50 @@ export function RoomMedia({
   );
 }
 
-function MediaTile({
+function VideoTile({
   title,
   stream,
   muted = false,
   placeholder,
   tall = false,
-  videoRef,
 }: {
   title: string;
   stream: MediaStream | null;
   muted?: boolean;
-  placeholder?: string | null;
+  placeholder?: string;
   tall?: boolean;
-  videoRef?: RefObject<HTMLVideoElement | null>;
 }) {
-  const innerRef = useRef<HTMLVideoElement | null>(null);
-  const ref = videoRef || innerRef;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasVideo = Boolean(stream?.getVideoTracks().some((t) => t.readyState === "live"));
+  const hasAudio = Boolean(stream?.getAudioTracks().some((t) => t.readyState === "live"));
 
   useEffect(() => {
-    if (ref.current && stream) {
-      ref.current.srcObject = stream;
+    const video = videoRef.current;
+    const audio = audioRef.current;
+    if (video) {
+      video.srcObject = hasVideo ? stream : null;
+      if (hasVideo && stream) void video.play().catch(() => undefined);
     }
-  }, [ref, stream]);
+    if (audio) {
+      audio.srcObject = !muted && hasAudio ? stream : null;
+      if (!muted && hasAudio && stream) void audio.play().catch(() => undefined);
+    }
+  }, [stream, hasVideo, hasAudio, muted]);
 
   return (
     <div className={`screen-tile ${tall ? "min-h-64" : "min-h-44"}`}>
-      {stream ? (
-        <video ref={ref} autoPlay playsInline muted={muted} />
+      {hasVideo ? (
+        <video ref={videoRef} autoPlay playsInline muted={muted} />
       ) : (
-        <div className="flex h-full min-h-44 items-center justify-center px-3 text-sm text-white/70">
+        <div className="flex h-full min-h-44 items-center justify-center px-3 text-center text-sm text-white/70">
           {placeholder || "No video"}
         </div>
       )}
+      {!muted ? <audio ref={audioRef} autoPlay /> : null}
       <div className="absolute bottom-2 left-2 rounded-full bg-black/55 px-3 py-1 text-xs text-white">
         {title}
+        {hasAudio && !muted ? " · mic" : ""}
       </div>
     </div>
   );
