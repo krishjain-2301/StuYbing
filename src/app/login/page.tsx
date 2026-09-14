@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, useTransition, Suspense } from "react";
 import { signIn } from "@/actions/auth";
-import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 
 function LoginForm() {
@@ -25,20 +24,13 @@ function LoginForm() {
         <ThemeToggle />
       </div>
       <div className="room-panel p-6 sm:p-8">
-      <h1 className="text-2xl font-semibold">Welcome back</h1>
-      <p className="mt-2 text-sm text-[var(--muted)]">
-        Log in to join your study room.
-      </p>
+        <h1 className="text-2xl font-semibold">Welcome back</h1>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Log in to join your study room.
+        </p>
 
-      <div className="mt-8 space-y-4">
-        <GoogleSignInButton next={next} />
-        <div className="flex items-center gap-3 text-xs uppercase tracking-wider text-[var(--muted)]">
-          <span className="h-px flex-1 bg-[var(--line)]" />
-          or
-          <span className="h-px flex-1 bg-[var(--line)]" />
-        </div>
         <form
-          className="space-y-3"
+          className="mt-8 space-y-3"
           action={(formData) => {
             startTransition(async () => {
               formData.set("next", next);
@@ -66,7 +58,6 @@ function LoginForm() {
             {pending ? "Signing in…" : "Log in"}
           </button>
         </form>
-      </div>
       </div>
 
       <p className="mt-6 text-sm text-[var(--muted)]">

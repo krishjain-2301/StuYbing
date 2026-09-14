@@ -11,7 +11,7 @@ A real-time virtual study room where friends study together, share screens live 
 ## Features
 
 ### Accounts & rooms
-- Email/password and Google sign-in (Supabase Auth)
+- Email/password authentication (Supabase Auth)
 - Create private rooms with optional password
 - Join via room code or invite link (`/room/ABC123`)
 - Personal dashboard with rooms, ranking snippet, and quick actions
@@ -62,7 +62,6 @@ npm install
 1. Create a project at [supabase.com](https://supabase.com)
 2. In **SQL Editor**, run [`supabase/migrations/001_init.sql`](supabase/migrations/001_init.sql)
 3. Enable **Email** under Authentication → Providers
-4. (Optional) Enable **Google** OAuth
 
 **Authentication → URL Configuration** (local):
 
@@ -109,8 +108,6 @@ Then in Supabase Auth URL settings, **add** (keep localhost for local dev):
 |--------|--------|
 | Site URL | `https://YOUR-APP.vercel.app` |
 | Redirect URLs | `https://YOUR-APP.vercel.app/auth/callback` |
-
-If using Google login, add the Vercel callback URL in Google Cloud OAuth as well.
 
 ---
 
