@@ -32,13 +32,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const stored = window.localStorage.getItem("stuybing-theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    // Default to AMOLED dark for first visit
     const initial: Theme =
-      stored === "light" || stored === "dark"
-        ? stored
-        : prefersDark
-          ? "dark"
-          : "light";
+      stored === "light" || stored === "dark" ? stored : "dark";
     setThemeState(initial);
     applyTheme(initial);
     setReady(true);

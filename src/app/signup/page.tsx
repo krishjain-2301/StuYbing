@@ -12,7 +12,7 @@ export default function SignupPage() {
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-12">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-3">
         <Link href="/" className="font-display text-3xl font-bold text-[var(--ink)]">
           StuYbing
         </Link>

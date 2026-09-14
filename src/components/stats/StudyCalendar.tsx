@@ -45,7 +45,9 @@ export function StudyCalendar({
           return (
             <div
               key={cell.date}
-              className={`heat-cell flex items-center justify-center text-[0.65rem] font-medium text-[var(--accent-ink)] ${heatClass(cell.seconds)}`}
+              className={`heat-cell flex items-center justify-center text-[0.65rem] font-medium ${
+                cell.seconds >= 2 * 3600 ? "text-black" : "text-[var(--ink)]"
+              } ${heatClass(cell.seconds)}`}
               title={`${cell.date}: ${formatHoursMinutes(cell.seconds)}`}
             >
               {day}

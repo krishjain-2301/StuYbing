@@ -41,7 +41,7 @@ export default function RootLayout({
       <body className="shell flex min-h-full flex-col">
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('stuybing-theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t;if(t==='dark')document.documentElement.classList.add('dark')}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('stuybing-theme');if(t!=='light'&&t!=='dark'){t='dark'}document.documentElement.dataset.theme=t;if(t==='dark')document.documentElement.classList.add('dark')}catch(e){document.documentElement.dataset.theme='dark';document.documentElement.classList.add('dark')}})();`,
           }}
         />
         <ThemeProvider>{children}</ThemeProvider>

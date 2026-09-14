@@ -148,7 +148,7 @@ export function TodoList({ roomId, roomCode, initialTasks }: Props) {
               onClick={() => onToggle(task)}
               className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                 task.completed
-                  ? "border-[var(--teal)] bg-[var(--teal)] text-white"
+                  ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-ink)]"
                   : "border-[var(--line)] bg-white"
               }`}
             >

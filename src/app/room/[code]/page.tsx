@@ -130,7 +130,7 @@ export default async function RoomPage({ params }: Props) {
   return (
     <div className="min-h-screen pb-16">
       <div className="nav-shell">
-        <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+        <header className="flex w-full flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <div>
             <Link href="/dashboard" className="text-xs text-[var(--muted)]">
               ← Dashboard
@@ -142,12 +142,12 @@ export default async function RoomPage({ params }: Props) {
               <p className="mt-1 text-sm text-[var(--muted)]">{room.description}</p>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <ThemeToggle />
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <span className="rounded-full border border-[var(--line)] bg-[var(--panel)] px-3 py-1.5 font-mono text-xs tracking-wider">
               Code {room.room_code}
             </span>
             <InviteLink roomCode={room.room_code} />
+            <ThemeToggle />
           </div>
         </header>
       </div>

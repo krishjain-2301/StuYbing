@@ -148,7 +148,7 @@ export function Leaderboard({
             className="leaderboard-row flex items-center justify-between gap-3 rounded-xl px-2 py-2"
           >
             <div className="flex items-center gap-3">
-              <span className="w-6 text-center font-semibold text-[var(--teal)]">
+              <span className="w-6 text-center font-semibold text-[var(--accent)]">
                 {index < 3 ? medals[index] : index + 1}
               </span>
               <span className="font-medium text-[var(--ink)]">

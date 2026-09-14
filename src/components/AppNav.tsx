@@ -5,15 +5,14 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 export function AppNav({ username }: { username?: string | null }) {
   return (
     <div className="nav-shell">
-      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
+      <header className="flex w-full items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
         <Link
           href={username ? "/dashboard" : "/"}
-          className="font-display text-2xl font-bold tracking-tight text-[var(--ink)]"
+          className="shrink-0 font-display text-2xl font-bold tracking-tight text-[var(--ink)]"
         >
           StuYbing
         </Link>
-        <nav className="flex items-center gap-1.5 sm:gap-2">
-          <ThemeToggle />
+        <nav className="flex shrink-0 items-center justify-end gap-1 sm:gap-2">
           {username ? (
             <>
               <Link href="/dashboard" className="btn-ghost hidden sm:inline-flex">
@@ -41,6 +40,7 @@ export function AppNav({ username }: { username?: string | null }) {
               </Link>
             </>
           )}
+          <ThemeToggle />
         </nav>
       </header>
     </div>
